@@ -264,11 +264,12 @@ object Build extends sbt.Build {
         /* - need JDK7 to link the doc to java.nio.charset.StandardCharsets
          * - in Scala 2.10, some ScalaDoc links fail
          */
+        /* keep community build stable
         val fatalInDoc =
           javaVersion.value >= 7 && scalaBinaryVersion.value != "2.10"
 
         if (fatalInDoc) baseOptions
-        else baseOptions.filterNot(_ == "-Xfatal-warnings")
+        else */ baseOptions.filterNot(_ == "-Xfatal-warnings")
       }
   )
 
