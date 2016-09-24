@@ -834,6 +834,9 @@ object Build {
           // Tell the plugin to hack-fix bad classOf trees
           scalacOptions += "-P:scalajs:fixClassOf",
 
+          libraryDependencies +=
+            "org.scala-lang" % "scala-library" % scalaVersion.value classifier "sources",
+
           artifactPath in fetchScalaSource :=
             target.value / "scalaSources" / scalaVersion.value,
 
@@ -843,11 +846,11 @@ object Build {
             val ver = scalaVersion.value
             val trgDir = (artifactPath in fetchScalaSource).value
 
-            val report = updateClassifiers.value
+            val report = update.value
             val scalaLibSourcesJar = report.select(
                 configuration = Set("compile"),
                 module = moduleFilter(name = "scala-library"),
-                artifact = artifactFilter(`type` = "src")).headOption.getOrElse {
+                artifact = artifactFilter(classifier = "sources")).headOption.getOrElse {
               sys.error(s"Could not fetch scala-library sources for version $ver")
             }
 
