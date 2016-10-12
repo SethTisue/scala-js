@@ -17,6 +17,7 @@ import org.junit.Assert._
 import org.junit.Assume._
 
 import org.scalajs.testsuite.utils.AssertThrows._
+import org.scalajs.testsuite.utils.JSUtils
 import org.scalajs.testsuite.utils.Platform._
 
 /*
@@ -304,7 +305,7 @@ class InteroperabilityTest {
     assertArrayEquals(Array("plop", 42, 51), new C(elems: _*).args)
   }
 
-  @Test def should_acces_top_level_JS_objects_via_Scala_object_inheriting_from_js_GlobalScope(): Unit = {
+  @Test def should_acces_top_level_JS_objects_via_Scala_object_with_annot_JSGlobalScope(): Unit = {
     js.eval("""
       var interoperabilityTestGlobalScopeValue = "7357";
       var interoperabilityTestGlobalScopeValueAsInt = function() {
@@ -320,6 +321,29 @@ class InteroperabilityTest {
 
     Global.interoperabilityTestGlobalScopeValue = "42"
     assertEquals(42, Global.interoperabilityTestGlobalScopeValueAsInt)
+  }
+
+  @Test def should_acces_top_level_JS_objects_via_Scala_object_inheriting_from_js_GlobalScope(): Unit = {
+    js.eval("""
+      var interoperabilityTestGlobalScopeDeprecatedValue = "7357";
+      var interoperabilityTestGlobalScopeDeprecatedValueAsInt = function() {
+        return parseInt(interoperabilityTestGlobalScopeDeprecatedValue);
+      };
+    """)
+
+    // Use alias for convenience: see end of file for definition
+    val Global = InteroperabilityTestGlobalScopeDeprecated
+
+    assertEquals("7357", Global.interoperabilityTestGlobalScopeDeprecatedValue)
+    assertEquals(7357, Global.interoperabilityTestGlobalScopeDeprecatedValueAsInt)
+
+    Global.interoperabilityTestGlobalScopeDeprecatedValue = "42"
+    assertEquals(42, Global.interoperabilityTestGlobalScopeDeprecatedValueAsInt)
+  }
+
+  @Test def extends_js_GlobalScope_takes_precedence_over_JSName(): Unit = {
+    assertSame(js.Dynamic.global,
+        InteroperabilityTestGlobalScopeDeprecatedWithJSName)
   }
 
   @Test def should_protect_receiver_of_raw_JS_apply_if_its_a_select_issue_804(): Unit = {
@@ -439,23 +463,23 @@ class InteroperabilityTest {
   @Test def should_unbox_Chars_received_from_calling_a_JS_interop_method(): Unit = {
     val obj = js.eval("""
       var obj = {
-        get: function() { return JSUtils().stringToChar('e'); }
+        get: function(JSUtils) { return JSUtils.stringToChar('e'); }
       };
       obj;
     """).asInstanceOf[InteroperabilityTestCharResult]
 
-    assertEquals('e'.toInt, obj.get().toInt)
+    assertEquals('e'.toInt, obj.get(JSUtils).toInt)
   }
 
   @Test def should_box_Chars_given_to_a_JS_interop_method(): Unit = {
     val obj = js.eval("""
       var obj = {
-        twice: function(c) { c = JSUtils().charToString(c); return c+c; }
+        twice: function(JSUtils, c) { c = JSUtils.charToString(c); return c+c; }
       };
       obj;
     """).asInstanceOf[InteroperabilityTestCharParam]
 
-    assertEquals("xx", obj.twice('x'))
+    assertEquals("xx", obj.twice(JSUtils, 'x'))
   }
 
   @Test def should_unbox_value_classes_received_from_calling_a_JS_interop_method(): Unit = {
@@ -504,7 +528,7 @@ class InteroperabilityTest {
         testChar: function() { return 5; },
         testInt: function() { return 6.4; },
         testShort: function() { return 60000; },
-        testDouble: function() { return JSUtils().stringToChar('e'); },
+        testDouble: function() { return "hello"; },
         testString: function() { return {}; },
         testValueClass: function() { return "hello"; },
         testNormalClass: function() { return 45; },
@@ -585,12 +609,12 @@ object InteroperabilityTest {
 
   @js.native
   trait InteroperabilityTestCharResult extends js.Object {
-    def get(): Char = js.native
+    def get(jsUtils: JSUtils.type): Char = js.native
   }
 
   @js.native
   trait InteroperabilityTestCharParam extends js.Object {
-    def twice(c: Char): String = js.native
+    def twice(jsUtils: JSUtils.type, c: Char): String = js.native
   }
 
   @js.native
@@ -730,10 +754,21 @@ class InteroperabilityTestVariadicCtor(inargs: Any*) extends js.Object {
 }
 
 @js.native
-object InteroperabilityTestGlobalScope extends js.GlobalScope {
+@JSGlobalScope
+object InteroperabilityTestGlobalScope extends js.Object {
   var interoperabilityTestGlobalScopeValue: String = js.native
   def interoperabilityTestGlobalScopeValueAsInt(): Int = js.native
 }
+
+@js.native
+object InteroperabilityTestGlobalScopeDeprecated extends js.GlobalScope {
+  var interoperabilityTestGlobalScopeDeprecatedValue: String = js.native
+  def interoperabilityTestGlobalScopeDeprecatedValueAsInt(): Int = js.native
+}
+
+@js.native
+@JSName("ThisDoesNotExistButItIsIgnored")
+object InteroperabilityTestGlobalScopeDeprecatedWithJSName extends js.GlobalScope
 
 class SomeValueClass(val i: Int) extends AnyVal {
   override def toString(): String = s"SomeValueClass($i)"

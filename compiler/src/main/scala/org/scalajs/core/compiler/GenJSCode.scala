@@ -46,7 +46,7 @@ abstract class GenJSCode extends plugins.PluginComponent
   import rootMirror._
   import definitions._
   import jsDefinitions._
-  import jsInterop.{jsNameOf, fullJSNameOf}
+  import jsInterop.{jsNameOf, compat068FullJSNameOf, jsNativeLoadSpecOf}
   import JSTreeExtractors._
 
   import treeInfo.hasSynthCaseSymbol
@@ -574,8 +574,8 @@ abstract class GenJSCode extends plugins.PluginComponent
       val newClassDef = {
         implicit val pos = origJsClass.pos
         val parent = js.Ident(ir.Definitions.ObjectClass)
-        js.ClassDef(origJsClass.name, ClassKind.RawJSType,
-            Some(parent), interfaces = Nil, jsName = None,
+        js.ClassDef(origJsClass.name, ClassKind.AbstractJSType,
+            Some(parent), interfaces = Nil, jsNativeLoadSpec = None,
             staticMembers.toList)(origJsClass.optimizerHints)
       }
 
@@ -685,18 +685,20 @@ abstract class GenJSCode extends plugins.PluginComponent
       implicit val pos = sym.pos
 
       val classIdent = encodeClassFullNameIdent(sym)
+      val kind = {
+        if (sym.isTraitOrInterface) ClassKind.AbstractJSType
+        else if (sym.isModuleClass) ClassKind.NativeJSModuleClass
+        else ClassKind.NativeJSClass
+      }
       val superClass =
         if (sym.isTraitOrInterface) None
         else Some(encodeClassFullNameIdent(sym.superClass))
-      val jsName =
-        if (sym.isTraitOrInterface || sym.isModuleClass) None
-        else Some(fullJSNameOf(sym))
+      val jsNativeLoadSpec =
+        if (sym.isTraitOrInterface) None
+        else Some(jsNativeLoadSpecOf(sym))
 
-      js.ClassDef(classIdent, ClassKind.RawJSType,
-          superClass,
-          genClassInterfaces(sym),
-          jsName,
-          Nil)(
+      js.ClassDef(classIdent, kind, superClass, genClassInterfaces(sym),
+          jsNativeLoadSpec, Nil)(
           OptimizerHints.empty)
     }
 
@@ -1998,7 +2000,25 @@ abstract class GenJSCode extends plugins.PluginComponent
           isRawJSCtorDefaultParam(sym)
         } else {
           sym.hasFlag(reflect.internal.Flags.DEFAULTPARAM) &&
-          isRawJSType(sym.owner.tpe)
+          isRawJSType(sym.owner.tpe) && {
+            /* If this is a default parameter accessor on a
+             * ScalaJSDefinedJSClass, we need to know if the method for which we
+             * are the default parameter is exposed or not.
+             * We do this by removing the $default suffix from the method name,
+             * and looking up a member with that name in the owner.
+             * Note that this does not work for local methods. But local methods
+             * are never exposed.
+             * Further note that overloads are easy, because either all or none
+             * of them are exposed.
+             */
+            def isAttachedMethodExposed = {
+              val methodName = nme.defaultGetterToMethod(sym.name)
+              val ownerMethod = sym.owner.info.decl(methodName)
+              ownerMethod.filter(isExposed).exists
+            }
+
+            !isScalaJSDefinedJSClass(sym.owner) || isAttachedMethodExposed
+          }
         }
       }
 
@@ -4143,16 +4163,6 @@ abstract class GenJSCode extends plugins.PluginComponent
       js.LoadJSConstructor(jstpe.ClassType(encodeClassFullName(sym)))
     }
 
-    /** Gen JS code representing a JS module (var of the global scope) */
-    private def genPrimitiveJSModule(sym: Symbol)(
-        implicit pos: Position): js.Tree = {
-      assert(sym.isModuleClass,
-          s"genPrimitiveJSModule called with non-module $sym")
-      fullJSNameOf(sym).split('.').foldLeft(genLoadGlobal()) { (memo, chunk) =>
-        js.JSBracketSelect(memo, js.StringLiteral(chunk))
-      }
-    }
-
     /** Gen actual actual arguments to Scala method call.
      *  Returns a list of the transformed arguments.
      *
@@ -4913,12 +4923,25 @@ abstract class GenJSCode extends plugins.PluginComponent
         if (sym1 == StringModule) RuntimeStringModule.moduleClass
         else sym1
 
-      val isGlobalScope = sym.tpe.typeSymbol isSubClass JSGlobalScopeClass
-
-      if (isGlobalScope) {
-        genLoadGlobal()
-      } else if (isJSNativeClass(sym)) {
-        genPrimitiveJSModule(sym)
+      if (isJSNativeClass(sym) &&
+          !sym.hasAnnotation(HasJSNativeLoadSpecAnnotation)) {
+        /* Compatibility for native JS modules compiled with Scala.js 0.6.12
+         * and earlier. Since they did not store their loading spec in the IR,
+         * the js.LoadJSModule() IR node cannot be used to load them. We must
+         * "desugar" it early in the compiler.
+         *
+         * Moreover, before 0.6.13, these objects would not have the
+         * annotation @JSGlobalScope. Instead, they would inherit from the
+         * magical trait js.GlobalScope.
+         */
+        if (sym.isSubClass(JSGlobalScopeClass)) {
+          genLoadGlobal()
+        } else {
+          compat068FullJSNameOf(sym).split('.').foldLeft(genLoadGlobal()) {
+            (memo, chunk) =>
+              js.JSBracketSelect(memo, js.StringLiteral(chunk))
+          }
+        }
       } else {
         val moduleClassName = encodeClassFullName(sym)
 

@@ -20,6 +20,7 @@ import org.scalajs.core.tools.linker.{LinkedClass, LinkingUnit}
 import org.scalajs.core.tools.javascript._
 import org.scalajs.core.tools.io._
 
+import org.scalajs.core.tools.linker.backend.ModuleKind.NoModule
 import org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript51Global
 import org.scalajs.core.tools.linker.backend.emitter._
 
@@ -27,6 +28,11 @@ private[rhino] class ScalaJSCoreLib(linkingUnit: LinkingUnit) {
   import ScalaJSCoreLib._
 
   require(linkingUnit.esLevel == ESLevel.ES5, "RhinoJSEnv only supports ES5")
+
+  private val emitter =
+    new Emitter(linkingUnit.semantics, ECMAScript51Global, NoModule)
+
+  emitter.rhinoAPI.initialize(linkingUnit)
 
   private val (providers, exportedSymbols) = {
     val providers = mutable.Map.empty[String, LinkedClass]
@@ -43,7 +49,7 @@ private[rhino] class ScalaJSCoreLib(linkingUnit: LinkingUnit) {
 
   def insertInto(context: Context, scope: Scriptable): Unit = {
     val semantics = linkingUnit.semantics
-    context.evaluateFile(scope, CoreJSLibs.lib(semantics, ECMAScript51Global))
+    context.evaluateFile(scope, emitter.rhinoAPI.getHeaderFile())
     lazifyScalaJSFields(scope)
 
     // Make sure exported symbols are loaded
@@ -105,8 +111,7 @@ private[rhino] class ScalaJSCoreLib(linkingUnit: LinkingUnit) {
   private def getSourceMapper(fileName: String, untilLine: Int) = {
     val linked = providers(fileName.stripSuffix(PseudoFileSuffix))
     val mapper = new Printers.ReverseSourceMapPrinter(untilLine)
-    val desugared =
-      new ScalaJSClassEmitter(ECMAScript51Global, linkingUnit).genClassDef(linked)
+    val desugared = emitter.rhinoAPI.genClassDef(linked)
     mapper.reverseSourceMap(desugared)
     mapper
   }
@@ -160,8 +165,7 @@ private[rhino] class ScalaJSCoreLib(linkingUnit: LinkingUnit) {
     val linkedClass = providers.getOrElse(encodedName,
         throw new RhinoJSEnv.ClassNotFoundException(encodedName))
 
-    val desugared =
-      new ScalaJSClassEmitter(ECMAScript51Global, linkingUnit).genClassDef(linkedClass)
+    val desugared = emitter.rhinoAPI.genClassDef(linkedClass)
 
     // Write tree
     val codeWriter = new java.io.StringWriter

@@ -15,6 +15,12 @@ class JSInteropTest extends DirectTest with TestHelpers {
     import scala.scalajs.js.annotation._
     """
 
+  private val JSNativeLoadSpecAnnots = Seq(
+      "JSName" -> "@JSName(\"foo\")",
+      "JSImport" -> "@JSImport(\"foo\", \"bar\")",
+      "JSGlobalScope" -> "@JSGlobalScope"
+  )
+
   @Test
   def warnNoJSNativeAnnotation: Unit = {
 
@@ -68,6 +74,155 @@ class JSInteropTest extends DirectTest with TestHelpers {
   }
 
   @Test
+  def noJSNameAnnotOnNonJSNative: Unit = {
+
+    for {
+      obj <- Seq("class", "trait", "object")
+    } yield {
+      s"""
+      @ScalaJSDefined
+      @JSName("foo")
+      $obj A extends js.Object
+      """ hasWarns
+      s"""
+        |newSource1.scala:6: warning: Non JS-native classes, traits and objects should not have an @JSName annotation, as it does not have any effect. This will be enforced in 1.0.
+        |      @JSName("foo")
+        |       ^
+      """
+    }
+
+    for {
+      obj <- Seq("class", "trait", "object")
+    } yield {
+      s"""
+      @JSName("foo")
+      $obj A
+      """ hasWarns
+      s"""
+        |newSource1.scala:5: warning: Non JS-native classes, traits and objects should not have an @JSName annotation, as it does not have any effect. This will be enforced in 1.0.
+        |      @JSName("foo")
+        |       ^
+      """
+    }
+
+  }
+
+  @Test
+  def noJSImportAnnotOnNonJSNative: Unit = {
+
+    for {
+      obj <- Seq("class", "trait", "object")
+    } yield {
+      s"""
+      @ScalaJSDefined
+      @JSImport("foo", JSImport.Namespace)
+      $obj A extends js.Object
+      """ hasErrors
+      s"""
+        |newSource1.scala:6: error: Non JS-native classes, traits and objects may not have an @JSImport annotation.
+        |      @JSImport("foo", JSImport.Namespace)
+        |       ^
+      """
+    }
+
+    for {
+      obj <- Seq("class", "trait", "object")
+    } yield {
+      s"""
+      @JSImport("foo", JSImport.Namespace)
+      $obj A
+      """ hasErrors
+      s"""
+        |newSource1.scala:5: error: Non JS-native classes, traits and objects may not have an @JSImport annotation.
+        |      @JSImport("foo", JSImport.Namespace)
+        |       ^
+      """
+    }
+
+  }
+
+  @Test
+  def noJSNameAnnotOnTrait: Unit = {
+
+    s"""
+    @js.native
+    @JSName("foo")
+    trait A extends js.Object
+    """ hasWarns
+    s"""
+      |newSource1.scala:6: warning: Traits should not have an @JSName annotation, as it does not have any effect. This will be enforced in 1.0.
+      |    @JSName("foo")
+      |     ^
+    """
+
+  }
+
+  @Test
+  def noJSImportAnnotOnTrait: Unit = {
+
+    s"""
+    @js.native
+    @JSImport("foo", JSImport.Namespace)
+    trait A extends js.Object
+    """ hasErrors
+    s"""
+      |newSource1.scala:6: error: Traits may not have an @JSImport annotation.
+      |    @JSImport("foo", JSImport.Namespace)
+      |     ^
+    """
+
+  }
+
+  @Test def noTwoJSNativeLoadSpecAnnots: Unit = {
+    for {
+      (firstAnnotName, firstAnnot) <- JSNativeLoadSpecAnnots
+      (secondAnnotName, secondAnnot) <- JSNativeLoadSpecAnnots
+    } {
+      val expectedMessageShort = {
+        if (firstAnnotName == "JSName" && secondAnnotName == firstAnnotName)
+          "warning: A duplicate @JSName annotation is ignored, and should be removed. This will be enforced in 1.0."
+        else if (firstAnnotName == "JSGlobalScope" && secondAnnotName == "JSName")
+          "warning: An @JSName annotation is ignored in the presence of @JSGlobalScope (or extends js.GlobalScope), and should be removed. This will be enforced in 1.0."
+        else
+          "error: Native JS classes and objects can only have one annotation among JSName, JSImport and JSGlobalScope (extending js.GlobalScope is treated as having @JSGlobalScope)."
+      }
+
+      val onlyWarn = expectedMessageShort.startsWith("warning: ")
+
+      val expectedMessage = {
+        s"""
+          |newSource1.scala:7: $expectedMessageShort
+          |$secondAnnot
+          | ^
+        """
+      }
+
+      val kinds = {
+        if (firstAnnotName == "JSGlobalScope" || secondAnnotName == "JSGlobalScope")
+          Seq("object")
+        else
+          Seq("class", "object")
+      }
+
+      for (kind <- kinds) {
+        val snippet = {
+          s"""
+            |@js.native
+            |$firstAnnot
+            |$secondAnnot
+            |$kind A extends js.Object
+          """.stripMargin
+        }
+
+        if (onlyWarn)
+          snippet hasWarns expectedMessage
+        else
+          snippet hasErrors expectedMessage
+      }
+    }
+  }
+
+  @Test
   def noJSNativeAnnotWithoutJSAny: Unit = {
 
     """
@@ -75,7 +230,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     class A
     """ hasErrors
     """
-      |newSource1.scala:6: error: Traits and classes not extending js.Any may not have a @js.native annotation
+      |newSource1.scala:6: error: Classes, traits and objects not extending js.Any may not have an @js.native annotation
       |    class A
       |          ^
     """
@@ -85,7 +240,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     trait A
     """ hasErrors
     """
-      |newSource1.scala:6: error: Traits and classes not extending js.Any may not have a @js.native annotation
+      |newSource1.scala:6: error: Classes, traits and objects not extending js.Any may not have an @js.native annotation
       |    trait A
       |          ^
     """
@@ -95,7 +250,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     object A
     """ hasErrors
     """
-      |newSource1.scala:6: error: Objects not extending js.Any may not have a @js.native annotation
+      |newSource1.scala:6: error: Classes, traits and objects not extending js.Any may not have an @js.native annotation
       |    object A
       |           ^
     """
@@ -105,7 +260,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     class A extends Enumeration
     """ hasErrors
     """
-      |newSource1.scala:6: error: Classes and objects not extending js.Any may not have a @js.native annotation
+      |newSource1.scala:6: error: Classes, traits and objects not extending js.Any may not have an @js.native annotation
       |    class A extends Enumeration
       |          ^
     """
@@ -115,7 +270,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     object A extends Enumeration
     """ hasErrors
     """
-      |newSource1.scala:6: error: Classes and objects not extending js.Any may not have a @js.native annotation
+      |newSource1.scala:6: error: Classes, traits and objects not extending js.Any may not have an @js.native annotation
       |    object A extends Enumeration
       |           ^
     """
@@ -374,7 +529,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     class A extends js.GlobalScope
     """ hasErrors
     """
-      |newSource1.scala:6: error: Only native objects may extend js.GlobalScope
+      |newSource1.scala:6: error: Only native JS objects can have an @JSGlobalScope annotation (or extend js.GlobalScope).
       |    class A extends js.GlobalScope
       |          ^
     """
@@ -384,7 +539,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     trait A extends js.GlobalScope
     """ hasErrors
     """
-      |newSource1.scala:6: error: Only native objects may extend js.GlobalScope
+      |newSource1.scala:6: error: Traits may not have an @JSGlobalScope annotation.
       |    trait A extends js.GlobalScope
       |          ^
     """
@@ -428,11 +583,27 @@ class JSInteropTest extends DirectTest with TestHelpers {
     @js.native
     @JSName("foo")
     object Bar extends js.GlobalScope
-    """ hasWarns
+    """ containsWarns
     """
-      |newSource1.scala:7: warning: Objects extending js.GlobalScope should not have a @JSName annotation. This will be enforced in 1.0.
-      |    object Bar extends js.GlobalScope
-      |           ^
+      |newSource1.scala:6: warning: An @JSName annotation is ignored in the presence of @JSGlobalScope (or extends js.GlobalScope), and should be removed. This will be enforced in 1.0.
+      |    @JSName("foo")
+      |     ^
+    """
+
+  }
+
+  @Test
+  def noJSImportOnJSGlobalScope: Unit = {
+
+    """
+    @js.native
+    @JSImport("foo", JSImport.Namespace)
+    object Bar extends js.GlobalScope
+    """ hasErrors
+    """
+      |newSource1.scala:6: error: Native JS classes and objects can only have one annotation among JSName, JSImport and JSGlobalScope (extending js.GlobalScope is treated as having @JSGlobalScope).
+      |    @JSImport("foo", JSImport.Namespace)
+      |     ^
     """
 
   }
@@ -600,7 +771,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     }
     """ hasWarns
     """
-      |newSource1.scala:7: warning: Native JS classes inside non-native objects should have an @JSName annotation. This will be enforced in 1.0.
+      |newSource1.scala:7: warning: Native JS classes inside non-native objects should have an @JSName or @JSImport annotation. This will be enforced in 1.0.
       |      class B extends js.Object
       |            ^
     """
@@ -612,7 +783,7 @@ class JSInteropTest extends DirectTest with TestHelpers {
     }
     """ hasErrors
     """
-      |newSource1.scala:7: error: Native JS objects inside non-native objects must have an @JSName annotation
+      |newSource1.scala:7: error: Native JS objects inside non-native objects must have an @JSName or @JSImport annotation
       |      object B extends js.Object
       |             ^
     """
@@ -638,6 +809,17 @@ class JSInteropTest extends DirectTest with TestHelpers {
       @js.native
       class B extends js.Object
       @JSName("InnerC")
+      @js.native
+      object C extends js.Object
+    }
+    """.hasNoWarns
+
+    """
+    object A {
+      @JSImport("InnerB", JSImport.Namespace)
+      @js.native
+      class B extends js.Object
+      @JSImport("InnerC", JSImport.Namespace)
       @js.native
       object C extends js.Object
     }
@@ -746,6 +928,113 @@ class JSInteropTest extends DirectTest with TestHelpers {
       |newSource1.scala:15: error: The argument to JSName must be a literal string
       |    @JSName(A.a)
       |     ^
+    """
+
+  }
+
+  @Test
+  def noJSImportOnMembers: Unit = {
+
+    """
+    @js.native
+    class Foo extends js.Object {
+      @JSImport("bar1", JSImport.Namespace)
+      val bar1: Int = js.native
+      @JSImport("bar2", JSImport.Namespace)
+      var bar2: Int = js.native
+      @JSImport("bar3", JSImport.Namespace)
+      def bar3: Int = js.native
+
+      @js.native
+      @JSImport("Inner", JSImport.Namespace)
+      class Inner extends js.Object
+
+      @js.native
+      @JSImport("Inner", JSImport.Namespace)
+      object Inner extends js.Object
+    }
+    """ hasErrors
+    """
+      |newSource1.scala:8: error: Methods and fields cannot be annotated with @JSImport.
+      |      val bar1: Int = js.native
+      |          ^
+      |newSource1.scala:10: error: Methods and fields cannot be annotated with @JSImport.
+      |      var bar2: Int = js.native
+      |          ^
+      |newSource1.scala:12: error: Methods and fields cannot be annotated with @JSImport.
+      |      def bar3: Int = js.native
+      |          ^
+      |newSource1.scala:16: error: Native JS traits and classes may not have inner traits, classes or objects
+      |      class Inner extends js.Object
+      |            ^
+      |newSource1.scala:20: error: Native JS traits and classes may not have inner traits, classes or objects
+      |      object Inner extends js.Object
+      |             ^
+    """
+
+  }
+
+  @Test
+  def noNonLiteralJSImport: Unit = {
+
+    """
+    object A {
+      val a = "Hello"
+    }
+
+    @JSImport(A.a, JSImport.Namespace)
+    @js.native
+    object B1 extends js.Object
+
+    @JSImport(A.a, "B2")
+    @js.native
+    object B2 extends js.Object
+
+    @JSImport("B3", A.a)
+    @js.native
+    object B3 extends js.Object
+
+    @JSImport(A.a, JSImport.Namespace)
+    @js.native
+    object C1 extends js.Object
+
+    @JSImport(A.a, "C2")
+    @js.native
+    object C2 extends js.Object
+
+    @JSImport("C3", A.a)
+    @js.native
+    object C3 extends js.Object
+
+    @JSImport(A.a, A.a)
+    @js.native
+    object D extends js.Object
+    """ hasErrors
+    """
+      |newSource1.scala:9: error: The first argument to @JSImport must be a literal string.
+      |    @JSImport(A.a, JSImport.Namespace)
+      |                ^
+      |newSource1.scala:13: error: The first argument to @JSImport must be a literal string.
+      |    @JSImport(A.a, "B2")
+      |                ^
+      |newSource1.scala:17: error: The second argument to @JSImport must be literal string or the JSImport.Namespace object.
+      |    @JSImport("B3", A.a)
+      |                      ^
+      |newSource1.scala:21: error: The first argument to @JSImport must be a literal string.
+      |    @JSImport(A.a, JSImport.Namespace)
+      |                ^
+      |newSource1.scala:25: error: The first argument to @JSImport must be a literal string.
+      |    @JSImport(A.a, "C2")
+      |                ^
+      |newSource1.scala:29: error: The second argument to @JSImport must be literal string or the JSImport.Namespace object.
+      |    @JSImport("C3", A.a)
+      |                      ^
+      |newSource1.scala:33: error: The first argument to @JSImport must be a literal string.
+      |    @JSImport(A.a, A.a)
+      |                ^
+      |newSource1.scala:33: error: The second argument to @JSImport must be literal string or the JSImport.Namespace object.
+      |    @JSImport(A.a, A.a)
+      |                     ^
     """
 
   }
